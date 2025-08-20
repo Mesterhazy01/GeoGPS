@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Útvonaltervező Magyar GPS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  body { margin:0; }
+  #map { height: 90vh; width: 100%; }
+  #controls { padding:5px; height:10vh; background:#f0f0f0; display:flex; gap:5px; align-items:center; }
+  input { flex:1; padding:5px; }
+  button { padding:5px 10px; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <button id="locBtn">A</button>
+  <input id="startInput" placeholder="Start cím">
+  <input id="endInput" placeholder="Cél cím" value="Debrecen">
+  <button id="routeBtn">Útvonal</button>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  var map = L.map('map').setView([47.1625, 19.5033], 7); // Magyarország
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 20
+  }).addTo(map);
+
+  var startMarker, endMarker, routeLayer;
+
+  async function geocode(address){
+    const coordMatch = address.match(/^(-?\d+(\.\d+)?),\s*(-?\d+(\.\d+)?)$/);
+    if(coordMatch) return [parseFloat(coordMatch[1]), parseFloat(coordMatch[3])];
+
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
+    const data = await resp.json();
+    if(data.length > 0) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+    else return null;
+  }
+
+  async function drawRoute(){
+    const startAddr = document.getElementById('startInput').value;
+    const endAddr = document.getElementById('endInput').value;
+
+    const startLatLng = await geocode(startAddr);
+    const endLatLng = await geocode(endAddr);
+
+    if(!startLatLng || !endLatLng){ alert("Helytelen cím"); return; }
+
+    if(startMarker) startMarker.setLatLng(startLatLng).bindPopup("Start: "+startAddr);
+    else {
+      startMarker = L.marker(startLatLng, {draggable:true}).addTo(map)
+        .bindPopup("Start: "+startAddr).openPopup();
+      startMarker.on('dragend', () => document.getElementById('startInput').value = startMarker.getLatLng().lat.toFixed(6)+', '+startMarker.getLatLng().lng.toFixed(6));
+    }
+
+    if(endMarker) map.removeLayer(endMarker);
+    if(routeLayer) map.removeLayer(routeLayer);
+
+    endMarker = L.marker(endLatLng, {draggable:true}).addTo(map).bindPopup("Cél: "+endAddr).openPopup();
+    endMarker.on('dragend', () => document.getElementById('endInput').value = endMarker.getLatLng().lat.toFixed(6)+', '+endMarker.getLatLng().lng.toFixed(6));
+
+    const url = `https://router.project-osrm.org/route/v1/driving/${startLatLng[1]},${startLatLng[0]};${endLatLng[1]},${endLatLng[0]}?overview=full&geometries=geojson`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+    routeLayer = L.polyline(coords, {color:'blue', weight:4}).addTo(map);
+
+    map.fitBounds(routeLayer.getBounds());
+  }
+
+  // “A” gomb esemény
+  document.getElementById('locBtn').addEventListener('click', () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+
+        document.getElementById('startInput').value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+
+        if(startMarker) startMarker.setLatLng([lat, lon]);
+        else {
+          startMarker = L.marker([lat, lon], {draggable:true}).addTo(map)
+            .bindPopup("Start: aktuális pozíció").openPopup();
+          startMarker.on('dragend', () => document.getElementById('startInput').value = startMarker.getLatLng().lat.toFixed(6)+', '+startMarker.getLatLng().lng.toFixed(6));
+        }
+
+        map.panTo([lat, lon]);
+      }, () => {
+        alert("GPS nem elérhető, start Budapestre állítva");
+        const lat = 47.4979, lon = 19.0402;
+        document.getElementById('startInput').value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+        if(startMarker) startMarker.setLatLng([lat, lon]);
+        else startMarker = L.marker([lat, lon], {draggable:true}).addTo(map)
+          .bindPopup("Start: Budapest").openPopup();
+        map.panTo([lat, lon]);
+      });
+    } else {
+      alert("A böngésző nem támogatja a GPS-t, start Budapestre állítva");
+      const lat = 47.4979, lon = 19.0402;
+      document.getElementById('startInput').value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+      if(startMarker) startMarker.setLatLng([lat, lon]);
+      else startMarker = L.marker([lat, lon], {draggable:true}).addTo(map)
+        .bindPopup("Start: Budapest").openPopup();
+      map.panTo([lat, lon]);
+    }
+  });
+
+  document.getElementById('routeBtn').addEventListener('click', drawRoute);
+</script>
+</body>
+</html>
